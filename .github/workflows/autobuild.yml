@@ -1,25 +1,23 @@
-name: YimMenu Windows Build
+name: Auto Build
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
-
+  schedule:
+    - cron: '0 0 * * *'  # 每天 UTC 时间午夜运行
+  workflow_dispatch:      # 允许手动触发
 jobs:
-  build-windows:
-    name: Build YimMenu for Windows
+  create-release:
+    name: Auto Build
     runs-on: windows-latest
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
       
     - name: Clone YimMenuV2
       run: |
         git clone --recursive https://github.com/YimMenu/YimMenuV2.git
-        cd YimMenuV2
 
     - name: Patch YimMenuV2
       run: |
@@ -27,10 +25,14 @@ jobs:
         cp ../*.py .
         cp ../*.TTF .
         cp ../*.diff .
-        cp ../*.json .
-        git apply Patch.diff
+        dos2unix patch.diff
+        git apply patch.diff
         python font.py
         mv MainFont.cpp src/game/frontend/fonts -Force
+
+    - name: Translate YimMenuV2
+      run: |
+        python update_translation.py
         python translate.py
     
     - name: Setup MSVC environment
@@ -48,14 +50,19 @@ jobs:
         cd YimMenuV2
         cmake --build ./build --config Release --target YimMenuV2 --
 
-    - name: Rename DLL to YimMenuV2-dev-{GITHUB_SHA}.dll
-      run: |
-        cd YimMenuV2/build
-        del YimMenuV2-dev-*.dll
-        ren YimMenuV2.dll YimMenuV2-dev-${{github.sha}}.dll
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        name: binary
-        path: YimMenuV2/build/YimMenuV2-dev-*.dll
+        tag_name: latest
+        overwrite: true
+        name: Autobuild
+        body: |
+          Automatic build of YimMenu
+          Commit: ${{ github.sha }}
+        draft: false
+        prerelease: false
+        files: |
+          YimMenuV2/build/YimMenuV2.dll
