@@ -4,16 +4,20 @@ on:
   schedule:
     - cron: '0 0 * * *'  # 每天 UTC 时间午夜运行
   workflow_dispatch:      # 允许手动触发
+
 jobs:
   create-release:
     name: Auto Build
     runs-on: windows-latest
+    permissions:
+      contents: write  # ✅ 必须添加这个权限
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0  # 获取完整历史记录
       
     - name: Clone YimMenuV2
       run: |
@@ -22,13 +26,16 @@ jobs:
     - name: Patch YimMenuV2
       run: |
         cd YimMenuV2
-        cp ../*.py .
-        cp ../*.TTF .
-        cp ../*.diff .
+        # 复制文件
+        Copy-Item ..\*.py .
+        Copy-Item ..\*.TTF .
+        Copy-Item ..\*.diff .
+        # 安装 dos2unix (如果未安装)
+        choco install dos2unix -y
         dos2unix patch.diff
         git apply patch.diff
         python font.py
-        mv MainFont.cpp src/game/frontend/fonts -Force
+        Move-Item MainFont.cpp src/game/frontend/fonts -Force
 
     - name: Translate YimMenuV2
       run: |
@@ -48,7 +55,7 @@ jobs:
     - name: Build 64bit release DLL
       run: |
         cd YimMenuV2
-        cmake --build ./build --config Release --target YimMenuV2 --
+        cmake --build ./build --config Release --target YimMenuV2
 
     - name: Create Release
       id: create_release
@@ -57,20 +64,30 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: latest
-        overwrite: true
         name: Autobuild
         body: |
           Automatic build of YimMenu
           Commit: ${{ github.sha }}
+          Build Date: ${{ github.event.head_commit.timestamp }}
         draft: false
         prerelease: false
         files: |
-          YimMenuV2/build/YimMenuV2.dll
+          YimMenuV2/build/**/YimMenuV2.dll
+        # 移除 overwrite: true 参数
 
-    - name: Commit and update translation
+    - name: Update translation and push
+      if: success()  # 仅在发布成功后更新
       run: |
-        git config user.name "github-actions"
-        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git add translation.json
-        git commit -m "Automated update"
-        git push
+        # 配置 git
+        git config --global user.name "github-actions"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        
+        # 检查是否有变更
+        $status = git status --porcelain
+        if ($status) {
+          git add translation.json
+          git commit -m "Automated translation update - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+          git push origin HEAD:${{ github.ref }}
+        } else {
+          Write-Host "No changes to commit"
+        }
